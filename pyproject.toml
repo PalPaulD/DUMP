@@ -1,0 +1,19 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "DUMP"
+version = "0.2"
+requires-python = ">=3.11"
+description = "Deep Universal Modeling of Pk - Neural ODE emulator for cosmology"
+dependencies = [
+    # torch is installed via conda (see environment.yml)
+    "pytorch-lightning>=2.6.0",
+    "torchdiffeq>=0.2.5",
+    "baccoemu>=2.3.0",
+] 
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["DUMP*"]

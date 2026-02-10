@@ -1,0 +1,23 @@
+name: DUMP_env
+channels:
+  - pytorch
+  - conda-forge
+  - defaults
+dependencies:
+  - python=3.11
+  - pytorch>=2.5.0
+  - numpy>=2.0.0
+  - pandas>=2.0.0
+  - scipy>=1.11.0
+  - matplotlib>=3.8.0
+  - pyyaml>=6.0.0
+  - h5py>=3.10.0
+  - pytest>=7.0.0
+  - pip
+  - pip:
+    - pytorch-lightning>=2.6.0
+    - torchdiffeq>=0.2.5
+    - baccoemu>=2.3.0
+    - wandb>=0.24.0
+    - progressbar2>=4.5.0
+    - pydantic>=2.12.0

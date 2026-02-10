@@ -1,0 +1,63 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+*.egg-info/
+dist/
+build/
+*.egg
+
+# Environments
+DUMP_env/
+.env
+.venv
+env/
+venv/
+
+# PyTorch / Training
+experiments/
+*.pth
+*.pt
+*.ckpt
+
+# Data
+*.json
+*.csv
+*.npz
+*.h5
+*.hdf5
+data/features_cache.npz
+data/cosmologies_*.csv
+
+# Jupyter
+.ipynb_checkpoints
+*.ipynb
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Weights & Biases
+wandb/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+logs/
+profiler_output/
+
+# Scalers (keep template, ignore generated)
+# data/scalers.json
+
+# Pytest
+.pytest_cache/
+.coverage
+htmlcov/

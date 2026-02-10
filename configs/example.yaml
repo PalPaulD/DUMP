@@ -1,0 +1,44 @@
+# An example of a config file for neural ODE training for bacco Pk
+
+# Experiment
+experiment_name: baseline
+use_wandb: false
+wandb_project: DUMP
+
+# Data
+train_file: ./data/cosmologies_train.csv
+val_file: ./data/cosmologies_val.csv
+test_file: ./data/cosmologies_test.csv
+scalers_path: ./data/scalers.json
+batch_size: 256
+num_workers: 12
+
+# Model
+features_list:
+  - H
+  - logrhom
+  - z
+  - D
+  - dH_dz
+  - dD_dz
+  - dlogrhom_dz 
+  - lin_pk
+  - ns
+  - sigma8
+lr: 0.0003
+lr_factor: 0.1
+scheduler_patience: 10
+width: 256
+depth: 5
+
+# Training
+max_train_steps: 100
+accelerator: auto
+devices: 1
+precision: "32"
+val_check_interval: 20
+val_with_desi_corner: true
+patience: 10
+
+# Plotting
+plot_test: true
