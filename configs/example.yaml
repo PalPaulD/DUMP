@@ -1,7 +1,7 @@
 # An example of a config file for neural ODE training for bacco Pk
 
 # Experiment
-experiment_name: baseline
+experiment_name: pipeline_test
 use_wandb: false
 wandb_project: DUMP
 
@@ -11,7 +11,7 @@ val_file: ./data/cosmologies_val.csv
 test_file: ./data/cosmologies_test.csv
 scalers_path: ./data/scalers.json
 batch_size: 256
-num_workers: 12
+num_workers: 16
 
 # Model
 features_list:
@@ -36,9 +36,11 @@ max_train_steps: 100
 accelerator: auto
 devices: 1
 precision: "32"
-val_check_interval: 20
+val_check_interval: 100
 val_with_desi_corner: true
-patience: 10
+patience: 5
 
 # Plotting
 plot_test: true
+plot_kmin: 0.5
+plot_kmax: 3.0

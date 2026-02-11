@@ -11,11 +11,28 @@ from DUMP.models import NeuralODE
 
 import contextlib
 
+# Configure matplotlib for publication-quality physics plots
+plt.rcParams.update({
+    'font.family': 'serif',
+    'text.usetex': False,  # Set to True if LaTeX is available
+    'font.size': 10,
+    'axes.labelsize': 11,
+    'axes.titlesize': 11,
+    'xtick.labelsize': 9,
+    'ytick.labelsize': 9,
+    'legend.fontsize': 9,
+    'figure.titlesize': 12,
+    'axes.linewidth': 0.8,
+    'grid.linewidth': 0.5,
+    'lines.linewidth': 1.5,
+})
+
 def plot_errors_w0wa_dataset(
     w0: np.ndarray,
     wa: np.ndarray,
     target: np.ndarray,
     target_pred: np.ndarray,
+    target_z: np.ndarray,
     k: np.ndarray = bacco_k,
     kmin: float = 0.5,      # in units of Mpc/h
     kmax: float = 3.0,
@@ -26,32 +43,35 @@ def plot_errors_w0wa_dataset(
     # Filter out large scales and "too small" scales
     mask = np.logical_and(k > kmin, k < kmax)
     rel_errors = 100 * (target_pred[:,:,mask] - target[:,:,mask]) / target[:,:,mask]
-    rel_errors = np.mean(np.abs(rel_errors), axis=1)
+    rel_errors = np.mean(np.abs(rel_errors), axis=-1)
+    print(rel_errors.shape, target_z.shape)
 
-    # Make plots for all bins
-    for i in range(len(rel_errors.shape[1])):
+    # Make plots for prediction bins (target_z[0] is init cond)
+    for i, z_val in enumerate(target_z[1:]):
         for res in resolutions:
             stat, x_edges, y_edges, _ = binned_statistic_2d(w0, wa, rel_errors[:,i], statistic="mean", bins=res)
-            fig, ax = plt.subplots(figsize=(10, 6))
+            fig, ax = plt.subplots(figsize=(7, 5))
             im = ax.imshow(
                 stat.T,
                 origin="lower",
                 extent=[x_edges[0], x_edges[-1], y_edges[0], y_edges[-1]],
-                cmap="viridis",
+                cmap="YlOrRd",
                 aspect="auto",
             )
             cbar = fig.colorbar(im, ax=ax)
-            cbar.set_label("%")
-            ax.set(
-                xlabel="w0", ylabel="wa",
-                title=f"Mean rel error in spectrum for k in [{kmin}, {kmax}]h/Mpc\nbinning res: {res}x{res}",
-            )
+            cbar.set_label("Relative error (%)", fontsize=10)
+            ax.set_xlabel(r"$w_0$", fontsize=11)
+            ax.set_ylabel(r"$w_a$", fontsize=11)
+            ax.set_title(f"Mean error at $z={z_val:.1f}$ for $k \\in [{kmin:.1f}, {kmax:.1f}]$ $h$/Mpc", fontsize=11)
+            fig.tight_layout()
 
             # Be optional about using wandb
             if save_location=="wandb":
-                logger.experiment.log({f"w0wa_errors/performance_{res}res/{i}_z_bin": wandb.Image(fig)})
+                logger.experiment.log({f"w0wa_errors/performance_{res}res/z{z_val:.1f}": wandb.Image(fig)})
             else:
-                plt.savefig(Path(save_location) / "w0wa_errors" / f"{res}res" / f"{i}_z_bin.png")
+                save_path = Path(save_location) / "w0wa_errors" / f"{res}res"
+                save_path.mkdir(parents=True, exist_ok=True)
+                plt.savefig(save_path / f"z{z_val:.1f}.png", dpi=200, bbox_inches='tight')
             plt.close(fig)
 
 def plot_one_param_ratios(
@@ -77,11 +97,13 @@ def plot_one_param_ratios(
     bacco emulator and trained model across different redshift bins.
     """
     from DUMP.data.features_engineering import nonlin_pk
-    from DUMP.data.constants import bacco_target_z
 
     # Initialize bacco emulator (suppress warnings)
     with open(os.devnull, 'w') as f, contextlib.redirect_stdout(f), contextlib.redirect_stderr(f):
         bacco_emulator = baccoemu.Matter_powerspectrum()
+
+    # Use model's target_z grid for consistency
+    target_z = trained_model.target_z.cpu().numpy()
 
     # Define parameters to vary
     params_info = {
@@ -95,11 +117,10 @@ def plot_one_param_ratios(
     }
 
     # Get fiducial predictions (both return log10(P(k)) with shape (n_z, n_k))
-    #fiducial_bacco = nonlin_pk(bacco_emulator, fiducial_cosmo, bacco_target_z)
     k_, fiducial_bacco = bacco_emulator.get_nonlinear_pk(
         k=bacco_k,
         cold=True,
-        expfactor=1/(1+trained_model.target_z),
+        expfactor=1/(1+target_z),
         omega_cold=fiducial_cosmo["omega_cold"],
         omega_baryon=fiducial_cosmo["omega_baryon"],
         hubble=fiducial_cosmo["hubble"],
@@ -124,62 +145,63 @@ def plot_one_param_ratios(
             cosmo = fiducial_cosmo.copy()
             cosmo[param_name] = param_val
 
-            # Get predictions
-            bacco_ = nonlin_pk(bacco_emulator, cosmo, bacco_target_z)
+            # Get predictions using model's target_z
+            bacco_ = nonlin_pk(bacco_emulator, cosmo, target_z)[1:]
             pred_ = trained_model.inference(cosmo, bacco_emulator).cpu().numpy()
             bacco.append(bacco_)
             preds.append(pred_)
 
         # shape (samples_per_param, n_z, n_k)
-        bacco = np.array(bacco)
-        preds = np.array(preds)
+        # Convert from log10 to linear scale for ratios
+        bacco = 10 ** np.array(bacco)
+        preds = 10 ** np.array(preds)
         bacco_ratios = bacco / fiducial_bacco
         model_ratios = preds / fiducial_pred
 
         # Plot for each redshift bin
         for z_idx in range(bacco_ratios.shape[1]):
-            fig, ax = plt.subplots(figsize=(10, 6))
+            fig, ax = plt.subplots(figsize=(8, 5))
+
+            # Use a professional color palette
+            colors = plt.cm.coolwarm(np.linspace(0.1, 0.9, samples_per_param))
 
             # Plot each parameter variation
             for i, param_val in enumerate(param_values):
-                # Use different colors for bacco vs model
-                color = plt.cm.viridis(i / (samples_per_param - 1))
                 ax.plot(
                     bacco_k, bacco_ratios[i, z_idx, :],
-                    color=color, linestyle='-', linewidth=2,
-                    label=f'Bacco {param_label}={param_val:.3f}'
+                    color=colors[i], linestyle='-', linewidth=1.5, alpha=0.7,
+                    label=f'{param_label}={param_val:.3f}'
                 )
                 ax.plot(
                     bacco_k, model_ratios[i, z_idx, :],
-                    color=color, linestyle='--', linewidth=2,
-                    label=f'Model {param_label}={param_val:.3f}'
+                    color=colors[i], linestyle='--', linewidth=1.5, alpha=0.9
                 )
 
-            ax.axhline(1.0, color='black', linestyle=':', alpha=0.5)
-            ax.set(
-                xlabel='k [h/Mpc]',
-                ylabel=r'$P(k) / P_{\rm fiducial}(k)$',
-                title=f'{param_label} variation, z={bacco_target_z[z_idx]:.2f}',
-                xscale='log',
-            )
-            ax.legend(fontsize=8, ncol=2)
-            ax.grid(True, alpha=0.3)
+            # Add reference line
+            ax.axhline(1.0, color='black', linestyle=':', linewidth=1.0, alpha=0.6, zorder=0)
+
+            ax.set_xlabel(r'$k$ [$h$ Mpc$^{-1}$]', fontsize=11)
+            ax.set_ylabel(r'$P(k) / P_{\rm fid}(k)$', fontsize=11)
+            ax.set_title(f'{param_label} variation, $z={target_z[z_idx]:.2f}$', fontsize=11)
+            ax.set_xscale('log')
+            ax.legend(fontsize=7, ncol=1, frameon=True, fancybox=False, edgecolor='black', loc='best')
+            ax.grid(True, alpha=0.2, linewidth=0.5)
+            fig.tight_layout()
 
             # Save
             if save_location == "wandb":
                 logger.experiment.log({
-                    f"param_ratios/{z_idx}_z_bin/{param_name}": wandb.Image(fig)
+                    f"param_ratios/z{target_z[z_idx]:.1f}/{param_name}": wandb.Image(fig)
                 })
             else:
-                save_path = Path(save_location) / "param_ratios" / f"{z_idx}_z_bin"
+                save_path = Path(save_location) / "param_ratios" / f"z{target_z[z_idx]:.1f}"
                 save_path.mkdir(parents=True, exist_ok=True)
-                plt.savefig(save_path / f"paran_name.png")
+                plt.savefig(save_path / f"{param_name}.png", dpi=200, bbox_inches='tight')
 
             plt.close(fig)
 
 def plot_errors_redshift_k(
     trained_model: NeuralODE,
-    new_solver_z: np.ndarray,
     logger=None,
     save_location: str = "wandb",
     fiducial_cosmo={
@@ -228,7 +250,7 @@ def plot_errors_redshift_k(
         sigma8_cold=fiducial_cosmo["sigma8_cold"],
         ns=fiducial_cosmo["ns"],
         neutrino_mass=0.0
-    )
+    )[1:]
     assert np.allclose(k_, k)
 
     model_pred = 10 ** trained_model.inference(fiducial_cosmo, bacco_emulator).cpu().numpy()
@@ -237,7 +259,7 @@ def plot_errors_redshift_k(
     rel_errors = 100 * np.abs((model_pred - bacco_pred) / bacco_pred)
 
     # Create figure
-    fig, ax = plt.subplots(figsize=(12, 6))
+    fig, ax = plt.subplots(figsize=(9, 5))
 
     # Create meshgrid for pcolormesh
     K, Z = np.meshgrid(k, z)
@@ -245,39 +267,39 @@ def plot_errors_redshift_k(
     # Plot heatmap
     im = ax.pcolormesh(
         K, Z, rel_errors,
-        cmap='viridis',
+        cmap='YlOrRd',
         shading='auto',
     )
 
     # Colorbar
     cbar = fig.colorbar(im, ax=ax)
-    cbar.set_label('Mean relative error (%)', fontsize=12)
+    cbar.set_label('Relative error (%)', fontsize=10)
 
     # Formatting
-    ax.set(
-        xlabel='k [h/Mpc]',
-        ylabel='Redshift z',
-        title='Model Interpolation Performance at Fiducial Cosmology',
-        xscale='log',
-    )
+    ax.set_xlabel(r'$k$ [$h$ Mpc$^{-1}$]', fontsize=11)
+    ax.set_ylabel(r'Redshift $z$', fontsize=11)
+    ax.set_title('Model accuracy at fiducial cosmology', fontsize=11)
+    ax.set_xscale('log')
     ax.invert_yaxis()  # Higher redshift at top
 
     # Add contour lines for readability
     contours = ax.contour(
         K, Z, rel_errors,
-        colors='white',
-        alpha=0.3,
-        linewidths=0.5,
+        colors='black',
+        alpha=0.25,
+        linewidths=0.6,
         levels=5
     )
-    ax.clabel(contours, inline=True, fontsize=8, fmt='%.1f%%')
+    ax.clabel(contours, inline=True, fontsize=7, fmt='%.1f%%')
+
+    fig.tight_layout()
 
     # Save
     if save_location == "wandb":
-        logger.experiment.log({"performance/errors_k_z_heatmap": wandb.Image(fig)})
+        logger.experiment.log({"performance/errors_k_z": wandb.Image(fig)})
     else:
         save_path = Path(save_location) / "performance"
         save_path.mkdir(parents=True, exist_ok=True)
-        plt.savefig(save_path / "errors_k_z_heatmap.png", dpi=150, bbox_inches='tight')
+        plt.savefig(save_path / "errors_k_z.png", dpi=200, bbox_inches='tight')
 
     plt.close(fig)

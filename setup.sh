@@ -3,7 +3,7 @@
 
 set -e  # Exit on error
 
-echo "🚀 Setting up DUMP environment..."
+echo " Setting up DUMP environment..."
 echo ""
 
 # Check if conda is available
@@ -28,7 +28,6 @@ fi
 
 # Create conda environment
 echo " Creating conda environment..."
-echo " This installs PyTorch via conda (avoids permission issues)"
 conda env create -f environment.yml -p "./DUMP_env"
 
 # Install DUMP package

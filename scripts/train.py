@@ -198,7 +198,7 @@ def main():
         ModelCheckpoint(
             filename=f"best_{args.experiment_name}",
             dirpath=output_path / "weights",
-            monitor="val L2, DESI corner",
+            monitor="val L2 DESI corner",
             mode="min",
             save_top_k=1,
             verbose=True
@@ -244,6 +244,7 @@ def main():
         wa=wa,
         target=target,
         target_pred=pred,
+        target_z=model.target_z.cpu().numpy(),
         k=bacco_k,
         kmin=args.plot_kmin,
         kmax=args.plot_kmax,

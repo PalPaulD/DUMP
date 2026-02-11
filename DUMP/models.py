@@ -98,7 +98,7 @@ class NeuralODE(pl.LightningModule):
         self.register_buffer("solver_z", torch.tensor(solver_z.copy(), dtype=torch.float32))
         self.register_buffer("target_z", torch.tensor(target_z.copy(), dtype=torch.float32))
 
-        # Validate uniform spacing (required for RK4 with [::2] grid)
+        # Validate uniform spacing (required for RK4)
         spacings = self.solver_z[1:] - self.solver_z[:-1]
         print(torch.unique(self.solver_z))
         if not torch.allclose(spacings, spacings[0], rtol=1e-4, atol=1e-7):
@@ -107,24 +107,15 @@ class NeuralODE(pl.LightningModule):
                 f"Spacing varies: {spacings.min():.10f} to {spacings.max():.10f}\n"
             )
 
-        # Compute target indices and validate grids are aligned
-        target_indices = []
+        # Validate target_z is a subset of solver_z
         for tz in target_z:
             idx = torch.argmin(torch.abs(self.solver_z - tz))
             closest = self.solver_z[idx]
             if torch.abs(closest - tz) > 1e-6:
                 raise ValueError(
-                    f"Target z={tz:.6f} not in feature grid! "
+                    f"Target z={tz:.6f} not in solver grid! "
                     f"Closest: {closest:.6f}"
                 )
-            if idx % 2 != 0:
-                raise ValueError(
-                    f"Target z={tz:.6f} at odd index {idx}. "
-                    f"Must be at even indices for RK4 with [::2] grid."
-                )
-            target_indices.append(idx.item() // 2)  # Adjust for [::2] grid
-
-        self.register_buffer("target_indices", torch.tensor(target_indices, dtype=torch.int))
 
 
     def forward(self, features, init_cond):
@@ -150,13 +141,15 @@ class NeuralODE(pl.LightningModule):
             options={"step_size": solver_dz}
         )
 
+        # solution shape: (len(target_z), batch, features) -> swap to (batch, len(target_z), features)
+        # Skip the initial condition (first time step) by taking [1:]
         solution = solution.swapaxes(0, 1)
-        return solution[:, self.target_indices[1:], :]
+        return solution[:, 1:, :]
 
     def training_step(self, batch, batch_idx):
         _, features, init_cond, target = batch
         target_pred = self(features, init_cond)
-        loss = F.mse_loss(target_pred, target)  # Train to fit redshifts together 
+        loss = F.mse_loss(target_pred, target)  # Train to fit redshifts together
         self.log("train L2", loss, on_step=True, on_epoch=False, logger=True)
         return loss
 
@@ -168,8 +161,14 @@ class NeuralODE(pl.LightningModule):
         # Loss over the whole range of params
         self.log("val L2 full", loss.mean(), prog_bar=True)
 
-        # Loss over the DESI corner of params
+        # Loss over the DESI corner of params, check that val batch has the right cosmologies
         mask = (cosmo["w0"] > -1.0) & (cosmo["wa"] < 0.0)
+        if not mask.any():
+            raise ValueError(
+                f"No validation samples in DESI corner (w0 > -1.0, wa < 0.0)!\n"
+                f"Batch w0 range: [{cosmo['w0'].min():.3f}, {cosmo['w0'].max():.3f}]\n"
+                f"Batch wa range: [{cosmo['wa'].min():.3f}, {cosmo['wa'].max():.3f}]"
+            )
         loss_desi = loss[mask].mean()
         self.log("val L2 DESI corner", loss_desi, prog_bar=True)
 
@@ -199,15 +198,15 @@ class NeuralODE(pl.LightningModule):
     def inference(self, cosmo, bacco_emulator):
         """Inference: compute features, solve, return unscaled Pk."""
         # Compute raw features and initial condition
-        features_dict = make_features(bacco_emulator, self.features_list, cosmo, self.solver_z)
-        init_cond_raw, _ = nonlin_pk(bacco_emulator, cosmo, self.target_z)
+        features_dict = make_features(bacco_emulator, self.features_list, cosmo, self.solver_z.cpu().numpy())
+        init_cond_raw = nonlin_pk(bacco_emulator, cosmo, self.target_z)[0]
 
         # Convert to torch and scale features
         features_list = []
-        for feat in self.features_list:
-            feat_tensor = torch.tensor(features_dict[feat], dtype=torch.float32)
-            feat_scaled = (feat_tensor - getattr(self, f"{feat}_mean")) / getattr(self, f"{feat}_std")
-            features_list.append(feat_scaled.unsqueeze(-1) if feat_scaled.ndim == 1 else feat_scaled)   # looking at you, lin_pk
+        for f in self.features_list:
+            f_tensor = torch.tensor(features_dict[f], dtype=torch.float32)
+            f_scaled = (f_tensor - getattr(self, f"{f}_mean")) / getattr(self, f"{f}_std")
+            features_list.append(f_scaled.unsqueeze(-1) if f_scaled.ndim == 1 else f_scaled)   # looking at you, lin_pk
         features = torch.cat(features_list, dim=-1).unsqueeze(0)
 
         # Scale initial condition
