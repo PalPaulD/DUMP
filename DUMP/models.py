@@ -100,7 +100,6 @@ class NeuralODE(pl.LightningModule):
 
         # Validate uniform spacing (required for RK4)
         spacings = self.solver_z[1:] - self.solver_z[:-1]
-        print(torch.unique(self.solver_z))
         if not torch.allclose(spacings, spacings[0], rtol=1e-4, atol=1e-7):
             raise ValueError(
                 f"solver_z must be uniformly spaced. "
@@ -158,25 +157,18 @@ class NeuralODE(pl.LightningModule):
         target_pred = self(features, init_cond)
         loss = F.mse_loss(target_pred, target, reduction="none").mean(dim=-1)   # average over bins, not over samples
 
-        # Loss over the whole range of params
-        self.log("val L2 full", loss.mean(), prog_bar=True)
+        # Loss over the whole range of params (with batch size for proper weighted averaging)
+        self.log("val L2 full", loss.mean(), prog_bar=True, on_step=False, on_epoch=True,
+                 batch_size=len(loss))
 
-        # Loss over the DESI corner of params, check that val batch has the right cosmologies
+        # Loss over the DESI corner of params (only log if batch has DESI corner samples)
         mask = (cosmo["w0"] > -1.0) & (cosmo["wa"] < 0.0)
-        if not mask.any():
-            raise ValueError(
-                f"No validation samples in DESI corner (w0 > -1.0, wa < 0.0)!\n"
-                f"Batch w0 range: [{cosmo['w0'].min():.3f}, {cosmo['w0'].max():.3f}]\n"
-                f"Batch wa range: [{cosmo['wa'].min():.3f}, {cosmo['wa'].max():.3f}]"
-            )
-        loss_desi = loss[mask].mean()
-        self.log("val L2 DESI corner", loss_desi, prog_bar=True)
-
-        # Pick the model based on the relevant loss
-        if self.val_with_desi_corner:
-            return loss_desi.mean()
-        else:
-            return loss.mean()
+        if mask.any():
+            loss_desi = loss[mask].mean()
+            # Only log when we have samples - batches without samples won't contribute
+            # Specify batch_size so Lightning knows how many samples contributed (for weighted average)
+            self.log("val L2 DESI corner", loss_desi, prog_bar=True, on_step=False, on_epoch=True,
+                     batch_size=mask.sum().item())
 
     def predict_step(self, batch, batch_idx):
         '''

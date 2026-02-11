@@ -82,16 +82,6 @@ def main():
     # Convert to namespace
     args = argparse.Namespace(**config)
 
-    # Setup output directory
-    output_path = Path("./experiments") / args.experiment_name
-    output_path.mkdir(parents=True, exist_ok=True)
-
-    # Save config
-    config_dict = vars(args)
-    with open(output_path / "config.yaml", "w") as f:
-        yaml.dump(config_dict, f, default_flow_style=False)
-    print(f"Config saved to {output_path / 'config.yaml'}")
-
     # Load scalers
     print(f"Loading scalers from {args.scalers_path}")
     scalers = load_scalers(args.scalers_path, args.features_list)
@@ -115,6 +105,9 @@ def main():
         scalers=scalers,
         cosmologies_file=args.test_file,
     )
+
+    from torch.utils.data import Subset
+    test_dataset = Subset(test_dataset, range(100))
 
     # Create dataloaders
     train_loader = DataLoader(
@@ -170,21 +163,35 @@ def main():
     )
     print(f"MLP: {model.mlp}")
 
-    # Setup logger
+    # Setup logger (this will auto-create version directories)
     if args.use_wandb:
         logger = WandbLogger(
             project=args.wandb_project,
             name=args.experiment_name,
-            save_dir=str(output_path),
+            save_dir="./experiments",
             config=vars(args),  # Log all config parameters to wandb
+            #log_model="all",  # Upload all checkpoints to wandb as artifacts (also saved locally)
         )
+        # WandbLogger: force run initialization by accessing experiment, then get version
+        _ = logger.experiment  # This initializes the wandb run and sets the version
+        output_path = Path("./experiments") / args.experiment_name / f"version_{logger.version}"
+        output_path.mkdir(parents=True, exist_ok=True)
     else:
         logger = CSVLogger(
-            save_dir=str(output_path),
+            save_dir="./experiments",
             name=args.experiment_name
         )
         print("Running with no wandb! The results are stored locally")
+        # CSVLogger: log_dir is available immediately
+        output_path = Path(logger.log_dir)
+        output_path.mkdir(parents=True, exist_ok=True)
 
+    # Save config to versioned directory
+    config_dict = vars(args)
+    with open(output_path / "config.yaml", "w") as f:
+        yaml.dump(config_dict, f, default_flow_style=False)
+    print(f"Config saved to {output_path / 'config.yaml'}")
+    print(f"Experiment version: {logger.version}")
 
     # Setup callbacks
     callbacks = [
@@ -198,7 +205,7 @@ def main():
         ModelCheckpoint(
             filename=f"best_{args.experiment_name}",
             dirpath=output_path / "weights",
-            monitor="val L2 DESI corner",
+            monitor="val L2 DESI corner" if args.val_with_desi_corner else "val L2 full",
             mode="min",
             save_top_k=1,
             verbose=True
@@ -208,7 +215,7 @@ def main():
 
     # Create trainer
     trainer = pl.Trainer(
-        num_sanity_val_steps=1,
+        num_sanity_val_steps=0,
         log_every_n_steps=1,
         max_steps=args.max_train_steps,
         val_check_interval=args.val_check_interval,
@@ -219,6 +226,7 @@ def main():
         logger=logger,
         default_root_dir=str(output_path),
         enable_progress_bar=True,
+        limit_val_batches=100,            # use this only for debugging the pipeline
     )
 
     # Train
@@ -228,12 +236,11 @@ def main():
 
     print(f"\nTraining complete!")
 
-    print("Running evaluation plotting...")
     plot_dir = output_path / "plots"
     plot_dir.mkdir(exist_ok=True)
 
     # w0wa plot requires a lot of samples, so I do it with dataloaders
-    print("Making w0wa errors plots...")
+    print("\nMaking w0wa errors plots...")
     test_pred = trainer.predict(model, test_loader)
     w0 = np.concatenate([batch['cosmo']['w0'].cpu().numpy() for batch in test_pred])
     wa = np.concatenate([batch['cosmo']['wa'].cpu().numpy() for batch in test_pred])
@@ -252,7 +259,7 @@ def main():
         save_location=str(plot_dir) if not args.use_wandb else "wandb",
     )
 
-    print("Making ratio plots...")
+    print("\nMaking ratio plots...")
     plot_one_param_ratios(
         trained_model=model,
         logger=logger if args.use_wandb else None,
@@ -260,7 +267,7 @@ def main():
         save_location=str(plot_dir) if not args.use_wandb else "wandb",
     )
 
-    print("Making k-z interpolation error heatmap...")
+    print("\nMaking k-z interpolation error heatmap...")
     plot_errors_redshift_k(
         trained_model=model,
         logger=logger if args.use_wandb else None,

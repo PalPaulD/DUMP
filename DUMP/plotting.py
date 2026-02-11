@@ -44,7 +44,6 @@ def plot_errors_w0wa_dataset(
     mask = np.logical_and(k > kmin, k < kmax)
     rel_errors = 100 * (target_pred[:,:,mask] - target[:,:,mask]) / target[:,:,mask]
     rel_errors = np.mean(np.abs(rel_errors), axis=-1)
-    print(rel_errors.shape, target_z.shape)
 
     # Make plots for prediction bins (target_z[0] is init cond)
     for i, z_val in enumerate(target_z[1:]):
@@ -55,7 +54,7 @@ def plot_errors_w0wa_dataset(
                 stat.T,
                 origin="lower",
                 extent=[x_edges[0], x_edges[-1], y_edges[0], y_edges[-1]],
-                cmap="YlOrRd",
+                cmap="viridis",
                 aspect="auto",
             )
             cbar = fig.colorbar(im, ax=ax)
@@ -67,7 +66,7 @@ def plot_errors_w0wa_dataset(
 
             # Be optional about using wandb
             if save_location=="wandb":
-                logger.experiment.log({f"w0wa_errors/performance_{res}res/z{z_val:.1f}": wandb.Image(fig)})
+                logger.experiment.log({f"w0wa_errors/{res}res/z{z_val:.1f}": wandb.Image(fig)})
             else:
                 save_path = Path(save_location) / "w0wa_errors" / f"{res}res"
                 save_path.mkdir(parents=True, exist_ok=True)
@@ -120,7 +119,7 @@ def plot_one_param_ratios(
     k_, fiducial_bacco = bacco_emulator.get_nonlinear_pk(
         k=bacco_k,
         cold=True,
-        expfactor=1/(1+target_z),
+        expfactor=1/(1+target_z[1:]),   # drop the first redshift, it is init cond
         omega_cold=fiducial_cosmo["omega_cold"],
         omega_baryon=fiducial_cosmo["omega_baryon"],
         hubble=fiducial_cosmo["hubble"],
@@ -241,7 +240,7 @@ def plot_errors_redshift_k(
     k_, bacco_pred = bacco_emulator.get_nonlinear_pk(
         k=k,
         cold=True,
-        expfactor=1/(1+z),
+        expfactor=1/(1+z[1:]),      # cut the initial redshift, not predicted by emu 
         omega_cold=fiducial_cosmo["omega_cold"],
         omega_baryon=fiducial_cosmo["omega_baryon"],
         hubble=fiducial_cosmo["hubble"],
@@ -250,7 +249,7 @@ def plot_errors_redshift_k(
         sigma8_cold=fiducial_cosmo["sigma8_cold"],
         ns=fiducial_cosmo["ns"],
         neutrino_mass=0.0
-    )[1:]
+    )
     assert np.allclose(k_, k)
 
     model_pred = 10 ** trained_model.inference(fiducial_cosmo, bacco_emulator).cpu().numpy()
@@ -261,8 +260,8 @@ def plot_errors_redshift_k(
     # Create figure
     fig, ax = plt.subplots(figsize=(9, 5))
 
-    # Create meshgrid for pcolormesh
-    K, Z = np.meshgrid(k, z)
+    # Create meshgrid for pcolormesh (use z[1:] to match prediction dimensions)
+    K, Z = np.meshgrid(k, z[1:])
 
     # Plot heatmap
     im = ax.pcolormesh(
@@ -280,23 +279,12 @@ def plot_errors_redshift_k(
     ax.set_ylabel(r'Redshift $z$', fontsize=11)
     ax.set_title('Model accuracy at fiducial cosmology', fontsize=11)
     ax.set_xscale('log')
-    ax.invert_yaxis()  # Higher redshift at top
-
-    # Add contour lines for readability
-    contours = ax.contour(
-        K, Z, rel_errors,
-        colors='black',
-        alpha=0.25,
-        linewidths=0.6,
-        levels=5
-    )
-    ax.clabel(contours, inline=True, fontsize=7, fmt='%.1f%%')
 
     fig.tight_layout()
 
     # Save
     if save_location == "wandb":
-        logger.experiment.log({"performance/errors_k_z": wandb.Image(fig)})
+        logger.experiment.log({"errors_k_z": wandb.Image(fig)})
     else:
         save_path = Path(save_location) / "performance"
         save_path.mkdir(parents=True, exist_ok=True)

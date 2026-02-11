@@ -57,8 +57,8 @@ def find_solver_grid(target_z, dz, method="rk4"):
 
     # torch calls the rhs multiple times with the same time
     requested_z = np.unique(requested_z)
-    print(f"Captured {len(requested_z)} unique redshift points")
-    print(f"Range: [{requested_z.min():.6f}, {requested_z.max():.6f}]")
+    #print(f"Captured {len(requested_z)} unique redshift points")
+    #print(f"Range: [{requested_z.min():.6f}, {requested_z.max():.6f}]")
 
     # numpy unique sorts the array, we solve from high z to small z
     return requested_z[::-1]
