@@ -106,9 +106,6 @@ def main():
         cosmologies_file=args.test_file,
     )
 
-    from torch.utils.data import Subset
-    test_dataset = Subset(test_dataset, range(100))
-
     # Create dataloaders
     train_loader = DataLoader(
         train_dataset,
@@ -215,7 +212,7 @@ def main():
 
     # Create trainer
     trainer = pl.Trainer(
-        num_sanity_val_steps=0,
+        num_sanity_val_steps=1,
         log_every_n_steps=1,
         max_steps=args.max_train_steps,
         val_check_interval=args.val_check_interval,
@@ -226,7 +223,7 @@ def main():
         logger=logger,
         default_root_dir=str(output_path),
         enable_progress_bar=True,
-        limit_val_batches=100,            # use this only for debugging the pipeline
+        #limit_val_batches=100,            # use this only for debugging the pipeline
     )
 
     # Train

@@ -181,7 +181,7 @@ def plot_one_param_ratios(
 
             ax.set_xlabel(r'$k$ [$h$ Mpc$^{-1}$]', fontsize=11)
             ax.set_ylabel(r'$P(k) / P_{\rm fid}(k)$', fontsize=11)
-            ax.set_title(f'{param_label} variation, $z={target_z[z_idx]:.2f}$', fontsize=11)
+            ax.set_title(f'{param_label} variation, $z={target_z[z_idx+1]:.2f}$', fontsize=11)
             ax.set_xscale('log')
             ax.legend(fontsize=7, ncol=1, frameon=True, fancybox=False, edgecolor='black', loc='best')
             ax.grid(True, alpha=0.2, linewidth=0.5)
@@ -190,7 +190,7 @@ def plot_one_param_ratios(
             # Save
             if save_location == "wandb":
                 logger.experiment.log({
-                    f"param_ratios/z{target_z[z_idx]:.1f}/{param_name}": wandb.Image(fig)
+                    f"param_ratios/z{target_z[z_idx+1]:.1f}/{param_name}": wandb.Image(fig)
                 })
             else:
                 save_path = Path(save_location) / "param_ratios" / f"z{target_z[z_idx]:.1f}"

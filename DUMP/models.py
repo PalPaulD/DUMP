@@ -155,16 +155,15 @@ class NeuralODE(pl.LightningModule):
     def validation_step(self, batch, batch_idx):
         cosmo, features, init_cond, target = batch
         target_pred = self(features, init_cond)
-        loss = F.mse_loss(target_pred, target, reduction="none").mean(dim=-1)   # average over bins, not over samples
 
-        # Loss over the whole range of params (with batch size for proper weighted averaging)
-        self.log("val L2 full", loss.mean(), prog_bar=True, on_step=False, on_epoch=True,
-                 batch_size=len(loss))
+        # Compute loss the same way as training (scalar value)
+        loss = F.mse_loss(target_pred, target)
+        self.log("val L2 full", loss, prog_bar=True, on_step=False, on_epoch=True)
 
         # Loss over the DESI corner of params (only log if batch has DESI corner samples)
         mask = (cosmo["w0"] > -1.0) & (cosmo["wa"] < 0.0)
         if mask.any():
-            loss_desi = loss[mask].mean()
+            loss_desi = F.mse_loss(target_pred[mask], target[mask])
             # Only log when we have samples - batches without samples won't contribute
             # Specify batch_size so Lightning knows how many samples contributed (for weighted average)
             self.log("val L2 DESI corner", loss_desi, prog_bar=True, on_step=False, on_epoch=True,

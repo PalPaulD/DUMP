@@ -64,16 +64,16 @@ def I(
     Compute I(z) = int_0^z 1 + w(z') / (1 + z') dz' where w(z) = w0 + wa * z / (1 + z).
     Utility function to be used by other features functions.
     '''
-    return (1 + cosmo_params["w0"] + cosmo_params["wa"]) * np.log(1 + z) + cosmo_params["wa"] * (z / (1 + z))
+    return (1 + cosmo_params["w0"] + cosmo_params["wa"]) * np.log(1 + z) - cosmo_params["wa"] * (z / (1 + z))
 
 def dI_dz(
     cosmo_params: dict[np.float64],
     z: np.ndarray
 ):
     '''
-    Compute dI/dz = 1 + w(z) / (1 + z) where w(z) = w0 + wa * z / (1 + z)
+    Compute dI/dz = [1 + w(z)] / (1 + z) where w(z) = w0 + wa * z / (1 + z)
     '''
-    return (1 + cosmo_params["w0"] + cosmo_params["wa"]) / (1 + z) + cosmo_params["wa"] / (1 + z)**2
+    return (1 + cosmo_params["w0"] + cosmo_params["wa"]) / (1 + z) - cosmo_params["wa"] / (1 + z)**2
 
 def H(
     cosmo_params: dict[np.float64],
@@ -104,7 +104,7 @@ def dH_dz(
     H0 = 100 * cosmo_params["hubble"]
     omega_cold = cosmo_params["omega_cold"]
 
-    dH_dz = (H0**2 / (2 * H_))* ( 3 * omega_cold * (1 + z)**2 + 3 * (1 - omega_cold) * np.exp(3 * I_) * dI_dz_ )
+    dH_dz = (H0**2 / (2 * H_)) * ( 3 * omega_cold * (1 + z)**2 + 3 * (1 - omega_cold) * np.exp(3 * I_) * dI_dz_ )
     return dH_dz
 
 def logrhom(cosmo_params: dict[np.float64], z: np.ndarray):
@@ -113,9 +113,8 @@ def logrhom(cosmo_params: dict[np.float64], z: np.ndarray):
     '''
     H0 = 100 * cosmo_params["hubble"]
     omega_cold = cosmo_params["omega_cold"]
-    rho_crit = 3 * (H0**2) / (8 * np.pi * 6.67430e-11)  # in kg/m^3
-    rho_m = omega_cold * rho_crit * (1 + z)**3
-    return np.log(rho_m)
+    logrhom = np.log(H0**2 * omega_cold * (1 + z)**3)
+    return logrhom
 
 def dlogrhom_dz(cosmo_params: dict[np.float64], z: np.ndarray):
     '''
@@ -245,7 +244,7 @@ def make_features(
         if key not in func_map:
             raise ValueError(f"Feature {key} is not implemented. Available features are: {list(func_map.keys())}")
         else:
-            if key=="lin_pk" or key=="nonlin_k":
+            if key=="lin_pk" or key=="nonlin_pk":
                 features[key] = func_map[key](bacco_emulator, cosmo_params, z)
             else:
                 features[key] = func_map[key](cosmo_params, z)
