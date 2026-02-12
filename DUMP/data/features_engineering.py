@@ -177,8 +177,8 @@ def dD_dz(
     integrand0 = (1 + z0_grid) / E0_grid**3
     D_at_0 = E0_grid[0] * np.trapezoid(integrand0, z0_grid)
 
-    # Assumes that D(z=0) = 1
-    return (dE_dz / E_z) * D_- (1 + z) / (E_z**2)
+    # Formula: dD/dz = (dE/dz / E) * D - (1+z) / (E^2 * D_at_0)
+    return (dE_dz / E_z) * D_- (1 + z) / (E_z**2 * D_at_0)
 
 def z(
     cosmo_params: dict[np.float64],
