@@ -13,6 +13,11 @@ scalers_path: ./data/scalers.json
 batch_size: 1
 num_workers: 1
 
+# w0waCDM control samples (set train_w0wacdm_file to null to disable)
+train_w0wacdm_file: null          # or ./data/cosmologies_train_control.csv
+train_w0wacdm_sampling_freq: 100  # Sample w0waCDM N× more often (1 = normal)
+train_w0wacdm_loss_weight: 5.0    # Weight w0waCDM loss N× more (1.0 = normal)
+
 # Model
 features_list:
   - H

@@ -14,7 +14,7 @@ import numpy as np
 import pytorch_lightning as pl
 from pytorch_lightning.callbacks import ModelCheckpoint, LearningRateMonitor, EarlyStopping
 from pytorch_lightning.loggers import WandbLogger, CSVLogger
-from torch.utils.data import DataLoader
+from torch.utils.data import DataLoader, ConcatDataset, WeightedRandomSampler
 from pathlib import Path
 
 from DUMP.models import NeuralODE
@@ -62,6 +62,65 @@ def load_scalers(scalers_path, features_list):
     return scalers
 
 
+def create_train_loader(args, features_list, scalers, target_z):
+    """Create train dataloader with optional w0wacdm upweighting."""
+    # ΛCDM dataset
+    lcdm_dataset = BaccoPk(
+        features_list=features_list,
+        target_z=target_z,
+        scalers=scalers,
+        cosmologies_file=args.train_file,
+        is_w0wacdm=False
+    )
+
+    # Optional w0wacdm dataset
+    w0wacdm_file = getattr(args, 'train_w0wacdm_file', None)
+    if not w0wacdm_file:
+        # No w0wacdm samples - return standard loader
+        return DataLoader(
+            lcdm_dataset,
+            batch_size=args.batch_size,
+            shuffle=True,
+            num_workers=args.num_workers,
+            pin_memory=True,
+            persistent_workers=True
+        )
+
+    # Load w0wacdm dataset
+    w0wacdm_dataset = BaccoPk(
+        features_list=features_list,
+        target_z=target_z,
+        scalers=scalers,
+        cosmologies_file=w0wacdm_file,
+        is_w0wacdm=True
+    )
+
+    # Concatenate datasets
+    combined_dataset = ConcatDataset([lcdm_dataset, w0wacdm_dataset])
+
+    # Create weighted sampler for oversampling w0wacdm
+    sampling_freq = getattr(args, 'train_w0wacdm_sampling_freq', 1)
+    sample_weights = [1.0] * len(lcdm_dataset) + [sampling_freq] * len(w0wacdm_dataset)
+    sampler = WeightedRandomSampler(
+        weights=sample_weights,
+        num_samples=len(combined_dataset),
+        replacement=True
+    )
+
+    print(f"\nTrain dataset composition:")
+    print(f"  ΛCDM: {len(lcdm_dataset)} samples")
+    print(f"  w0waCDM: {len(w0wacdm_dataset)} samples (sampled {sampling_freq}× more frequently)")
+
+    return DataLoader(
+        combined_dataset,
+        batch_size=args.batch_size,
+        sampler=sampler,
+        num_workers=args.num_workers,
+        pin_memory=True,
+        persistent_workers=True
+    )
+
+
 def main():
     parser = argparse.ArgumentParser(description="Train cosmology emulator")
     parser.add_argument("--config", type=str, default="configs/config.yaml",
@@ -86,13 +145,10 @@ def main():
     print(f"Loading scalers from {args.scalers_path}")
     scalers = load_scalers(args.scalers_path, args.features_list)
 
-    # Create datasets (emulator will be initialized lazily in each worker)
-    train_dataset = BaccoPk(
-        features_list=args.features_list,
-        target_z=bacco_target_z,
-        scalers=scalers,
-        cosmologies_file=args.train_file,
-    )
+    # Create train loader (with optional w0wacdm upweighting)
+    train_loader = create_train_loader(args, args.features_list, scalers, bacco_target_z)
+
+    # Create validation/test datasets (emulator will be initialized lazily in each worker)
     val_dataset = BaccoPk(
         features_list=args.features_list,
         target_z=bacco_target_z,
@@ -106,15 +162,7 @@ def main():
         cosmologies_file=args.test_file,
     )
 
-    # Create dataloaders
-    train_loader = DataLoader(
-        train_dataset,
-        batch_size=args.batch_size,
-        shuffle=True,
-        num_workers=args.num_workers,
-        pin_memory=True,
-        persistent_workers=True
-    )
+    # Create validation/test dataloaders
     val_loader = DataLoader(
         val_dataset,
         batch_size=args.batch_size,
@@ -132,7 +180,6 @@ def main():
     )
 
     print("\nDataset sizes:")
-    print(f"Train: {len(train_dataset)} samples")
     print(f"Val: {len(val_dataset)} samples")
     print(f"Test: {len(test_dataset)} samples")
     print(f"Features: {args.features_list}")
@@ -156,7 +203,8 @@ def main():
         lr_factor=args.lr_factor,
         scheduler_patience=args.scheduler_patience,
         scalers=scalers,
-        val_with_desi_corner=args.val_with_desi_corner
+        val_with_desi_corner=args.val_with_desi_corner,
+        w0wacdm_loss_weight=getattr(args, 'train_w0wacdm_loss_weight', 1.0),
     )
     print(f"MLP: {model.mlp}")
 

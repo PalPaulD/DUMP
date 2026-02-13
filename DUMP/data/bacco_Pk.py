@@ -47,6 +47,7 @@ class BaccoPk(Dataset):
         target_z: np.ndarray,
         scalers: dict,
         cosmologies_file: str = "./data/cosmologies.csv",
+        is_w0wacdm: bool = False,
     ):
         super().__init__()
         self.features_list = features_list
@@ -56,6 +57,7 @@ class BaccoPk(Dataset):
         self.cosmologies = pd.read_csv(cosmologies_file)
         # Don't store emulator directly - use lazy initialization for multiprocessing
         self._bacco_emulator = None
+        self.is_w0wacdm = is_w0wacdm
 
     @property
     def bacco_emulator(self):
@@ -93,6 +95,7 @@ class BaccoPk(Dataset):
 
         # Convert cosmo_params to float32 (pandas uses float64 by default)
         cosmo_params = {k: np.float32(v) for k, v in cosmo_params.items()}
+        cosmo_params['is_w0wacdm'] = np.float32(self.is_w0wacdm)
 
         return cosmo_params, features, init_cond, target
 

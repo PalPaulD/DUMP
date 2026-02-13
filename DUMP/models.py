@@ -40,7 +40,8 @@ class NeuralODE(pl.LightningModule):
         lr_factor,
         scheduler_patience,
         scalers,
-        val_with_desi_corner=True
+        val_with_desi_corner=True,
+        w0wacdm_loss_weight=1.0,
     ):
         super().__init__()
         self.save_hyperparameters(ignore=["scalers"])
@@ -83,6 +84,7 @@ class NeuralODE(pl.LightningModule):
         self.lr_factor = lr_factor
         self.scheduler_patience = scheduler_patience
         self.val_with_desi_corner = val_with_desi_corner
+        self.w0wacdm_loss_weight = w0wacdm_loss_weight
 
         # Store all scalers as buffers (saved with checkpoint)
         self.register_buffer("target_mean", torch.as_tensor(scalers["target"]["mean"], dtype=torch.float32))
@@ -146,9 +148,17 @@ class NeuralODE(pl.LightningModule):
         return solution[:, 1:, :]
 
     def training_step(self, batch, batch_idx):
-        _, features, init_cond, target = batch
+        cosmo, features, init_cond, target = batch
         target_pred = self(features, init_cond)
-        loss = F.mse_loss(target_pred, target)  # Train to fit redshifts together
+
+        # Apply per-sample weights for w0wacdm cosmologies
+        weights = torch.where(
+            cosmo.get('is_w0wacdm', 0) > 0.5,
+            self.w0wacdm_loss_weight,
+            1.0
+        )
+        loss = (weights * F.mse_loss(target_pred, target, reduction='none').mean(dim=(1, 2))).mean()
+
         self.log("train L2", loss, on_step=True, on_epoch=False, logger=True)
         return loss
 

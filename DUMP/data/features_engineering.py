@@ -205,6 +205,13 @@ def sigma8(
     sigma8 = cosmo_params["sigma8_cold"] * np.ones_like(z)
     return sigma8
 
+def Ob0(
+    cosmo_params: dict[np.float64],
+    z: np.ndarray
+):
+    Ob = cosmo_params["omega_baryon"] * np.ones_like(z)
+    return Ob
+
 
 ###
 #    Main feature engineering function
@@ -220,7 +227,8 @@ func_map = {
     "dD_dz": dD_dz,
     "lin_pk": lin_pk,
     "sigma8": sigma8,
-    "ns": ns
+    "ns": ns,
+    "Ob0": Ob0
 }
 
 def make_features(
