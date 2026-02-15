@@ -14,7 +14,7 @@ import numpy as np
 import pytorch_lightning as pl
 from pytorch_lightning.callbacks import ModelCheckpoint, LearningRateMonitor, EarlyStopping
 from pytorch_lightning.loggers import WandbLogger, CSVLogger
-from torch.utils.data import DataLoader
+from torch.utils.data import DataLoader, ConcatDataset, WeightedRandomSampler
 from pathlib import Path
 
 from DUMP.models import NeuralODE
@@ -61,6 +61,38 @@ def load_scalers(scalers_path, features_list):
 
     return scalers
 
+def train_loader_with_control_samples(args, scalers):
+    """Combine main train dataset with control samples"""
+    train_dataset = BaccoPk(
+        features_list=args.features_list,
+        target_z=bacco_target_z,
+        scalers=scalers,
+        cosmologies_file=args.train_file,
+    )
+    control_dataset = BaccoPk(
+        features_list=args.features_list,
+        target_z=bacco_target_z,
+        scalers=scalers,
+        cosmologies_file=args.control_file,
+    )
+    dataset = ConcatDataset([train_dataset, control_dataset])
+    print(f"Train: {len(train_dataset)} samples")
+    
+    # sample few control cosmologies more often
+    weights = [1.0] * len(train_dataset) + [args.control_sampling_rate] * len(control_dataset)
+    sampler = WeightedRandomSampler(weights, num_samples=len(dataset), replacement=True)
+
+    train_loader = DataLoader(
+        dataset,
+        batch_size=args.batch_size,
+        sampler=sampler,
+        num_workers=args.num_workers,
+        pin_memory=True,
+        persistent_workers=True
+    )
+
+    return train_loader
+
 
 def main():
     parser = argparse.ArgumentParser(description="Train cosmology emulator")
@@ -87,12 +119,6 @@ def main():
     scalers = load_scalers(args.scalers_path, args.features_list)
 
     # Create datasets (emulator will be initialized lazily in each worker)
-    train_dataset = BaccoPk(
-        features_list=args.features_list,
-        target_z=bacco_target_z,
-        scalers=scalers,
-        cosmologies_file=args.train_file,
-    )
     val_dataset = BaccoPk(
         features_list=args.features_list,
         target_z=bacco_target_z,
@@ -107,14 +133,7 @@ def main():
     )
 
     # Create dataloaders
-    train_loader = DataLoader(
-        train_dataset,
-        batch_size=args.batch_size,
-        shuffle=True,
-        num_workers=args.num_workers,
-        pin_memory=True,
-        persistent_workers=True
-    )
+    train_loader = train_loader_with_control_samples(args, scalers)
     val_loader = DataLoader(
         val_dataset,
         batch_size=args.batch_size,
@@ -131,8 +150,6 @@ def main():
         pin_memory=True,
     )
 
-    print("\nDataset sizes:")
-    print(f"Train: {len(train_dataset)} samples")
     print(f"Val: {len(val_dataset)} samples")
     print(f"Test: {len(test_dataset)} samples")
     print(f"Features: {args.features_list}")
@@ -154,9 +171,10 @@ def main():
         features_list=args.features_list,
         lr=args.lr,
         lr_factor=args.lr_factor,
-        scheduler_patience=args.scheduler_patience,
+        lr_scheduler_patience=args.lr_scheduler_patience,
         scalers=scalers,
-        val_with_desi_corner=args.val_with_desi_corner
+        val_with_desi_corner=args.val_with_desi_corner,
+        control_loss_weight=args.control_loss_weight
     )
     print(f"MLP: {model.mlp}")
 
@@ -231,7 +249,7 @@ def main():
 
     trainer.fit(model, train_loader, val_loader)
 
-    print(f"\nTraining complete!")
+    print(f"\nTraining complete! Control samples seen during training: {model.control_samples_seen_}")
 
     plot_dir = output_path / "plots"
     plot_dir.mkdir(exist_ok=True)

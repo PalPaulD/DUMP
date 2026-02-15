@@ -1,18 +1,15 @@
-# An example of a config file for neural ODE training for bacco Pk
-
 # Experiment
-experiment_name: example
+experiment_name: with hubble & matter derivatives
 use_wandb: true
 wandb_project: DUMP
 
 # Data
 train_file: ./data/cosmologies_train.csv
-control_file: ./data/cosmologies_control.csv
 val_file: ./data/cosmologies_val.csv
 test_file: ./data/cosmologies_test.csv
 scalers_path: ./data/scalers.json
-batch_size: 1
-num_workers: 1
+batch_size: 256
+num_workers: 16
 
 # Model
 features_list:
@@ -21,27 +18,21 @@ features_list:
   - z
   - D
   - dH_dz
-  - dD_dz
-  - dlogrhom_dz 
-  - lin_pk
-  - ns
-  - sigma8
+  - dlogrhom_dz
 lr: 0.0003
 lr_factor: 0.1
-lr_scheduler_patience: 300
+scheduler_patience: 250
 width: 256
 depth: 5
 
 # Training
-max_train_steps: 100
+max_train_steps: 1_000_000
 accelerator: auto
 devices: 1
 precision: "32"
-val_check_interval: 100
+val_check_interval: 50
 val_with_desi_corner: true
-patience: 5
-control_sampling_rate: 10.0     # To turn off control with w0wa cosmologies, set this to 0
-control_loss_weight: 1.0
+patience: 10
 
 # Plotting
 plot_test: true

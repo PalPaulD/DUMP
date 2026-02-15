@@ -8,6 +8,13 @@ from DUMP.data.constants import bacco_target_z, solver_dz
 from DUMP.utils import find_solver_grid 
 from DUMP.data.features_engineering import make_features, nonlin_pk
 
+def mse_loss(pred, target, weight=None):
+    if weight is not None:
+        mse = F.mse_loss(pred, target, reduction='none').mean(dim=(1,2))  # mean over redshift and features
+        return (mse * weight).sum() / weight.sum()  # so that weights = 2 and weights = 1 are equivalent
+    else:
+        return F.mse_loss(pred, target)
+
 class MLP(nn.Module):
     def __init__(
         self,
@@ -38,9 +45,10 @@ class NeuralODE(pl.LightningModule):
         features_list,
         lr,
         lr_factor,
-        scheduler_patience,
+        lr_scheduler_patience,
         scalers,
-        val_with_desi_corner=True
+        val_with_desi_corner=True,
+        control_loss_weight=0.0
     ):
         super().__init__()
         self.save_hyperparameters(ignore=["scalers"])
@@ -81,8 +89,10 @@ class NeuralODE(pl.LightningModule):
         # Learning params
         self.lr = lr
         self.lr_factor = lr_factor
-        self.scheduler_patience = scheduler_patience
+        self.lr_scheduler_patience = lr_scheduler_patience
         self.val_with_desi_corner = val_with_desi_corner
+        self.control_loss_weight = control_loss_weight
+        self.control_samples_seen_ = 0
 
         # Store all scalers as buffers (saved with checkpoint)
         self.register_buffer("target_mean", torch.as_tensor(scalers["target"]["mean"], dtype=torch.float32))
@@ -146,9 +156,22 @@ class NeuralODE(pl.LightningModule):
         return solution[:, 1:, :]
 
     def training_step(self, batch, batch_idx):
-        _, features, init_cond, target = batch
+        cosmo, features, init_cond, target = batch
         target_pred = self(features, init_cond)
-        loss = F.mse_loss(target_pred, target)  # Train to fit redshifts together
+
+        # Any desi corner cosmologies should be reweighted
+        mask = (cosmo["w0"] > -(1.0+1e-5)) & (cosmo["wa"] < (0.0-1e-5))
+        weights = torch.ones(len(target), device=target.device)
+        weights[mask] *= self.control_loss_weight
+        loss = mse_loss(target_pred, target, weight=weights)  # fit all redshifts together
+
+        # compute control loss separately, shouldn't be too slow
+        if mask.any():
+            self.control_samples_seen_ += mask.sum().item()
+            loss_control = mse_loss(target_pred[mask], target[mask])
+            self.log("train L2 DESI corner", loss_control, on_step=True, on_epoch=False, logger=True, 
+            batch_size=mask.sum().item())
+
         self.log("train L2", loss, on_step=True, on_epoch=False, logger=True)
         return loss
 
@@ -157,13 +180,13 @@ class NeuralODE(pl.LightningModule):
         target_pred = self(features, init_cond)
 
         # Compute loss the same way as training (scalar value)
-        loss = F.mse_loss(target_pred, target)
+        loss = mse_loss(target_pred, target)
         self.log("val L2 full", loss, prog_bar=True, on_step=False, on_epoch=True)
 
         # Loss over the DESI corner of params (only log if batch has DESI corner samples)
         mask = (cosmo["w0"] > -1.0) & (cosmo["wa"] < 0.0)
         if mask.any():
-            loss_desi = F.mse_loss(target_pred[mask], target[mask])
+            loss_desi = mse_loss(target_pred[mask], target[mask])
             # Only log when we have samples - batches without samples won't contribute
             # Specify batch_size so Lightning knows how many samples contributed (for weighted average)
             self.log("val L2 DESI corner", loss_desi, prog_bar=True, on_step=False, on_epoch=True,
@@ -214,7 +237,7 @@ class NeuralODE(pl.LightningModule):
         optimizer = torch.optim.Adam(self.parameters(), lr=self.lr)
 
         scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
-            optimizer, mode="min", factor=self.lr_factor, patience=self.scheduler_patience,
+            optimizer, mode="min", factor=self.lr_factor, patience=self.lr_scheduler_patience,
         )
         return {
             "optimizer": optimizer,
